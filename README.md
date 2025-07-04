@@ -1,3 +1,4 @@
+## FIT3152 2025S1 Assignment 1
 The analysis focuses on Andorra (AND) as the target country, leveraging the World Values Survey (Wave 7) dataset and Global Health Security Index (GHSI) data. Key tasks include:
 
 1. Data Preprocessing: Handling missing values, imputation, and variable classification (categorical/numerical).
