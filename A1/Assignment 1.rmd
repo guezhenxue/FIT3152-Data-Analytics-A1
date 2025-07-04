@@ -1,0 +1,575 @@
+The following are the initial codes given. It mainly purposed to clear existing objects,and create individual data.
+
+```{r}
+rm(list = ls())
+options(warn=-1)
+# The following are existing info
+student_id <- 33521352
+focus_country = "AND"
+focus_country_full = "Andorra"
+
+# Library needed
+library(reshape2) 
+library(ggplot2) 
+library(dplyr)
+library(tidyr)
+library(corrplot)
+```
+
+```{r}
+set.seed(student_id)  
+VCData = read.csv("WVSExtract.csv") 
+VC = VCData[sample(1:nrow(VCData),50000, replace=FALSE),] 
+VC = VC[,c(1:6, sort(sample(7:46,17, replace = FALSE)), 47:53, 
+sort(sample(54:69,10, replace = FALSE)))] 
+```
+
+Initial overview of code is as follows:
+
+```{r}
+head(VC)
+```
+
+**Data preprocessing**
+
+In overall, there are `r nrow(VC)` rows and `r ncol(VC)` columns.
+
+Although the data are coded in numerical scale, negative values which indicate missing values are still required to be treated. They will be replaced by `NA`.
+
+```{r}
+VC[VC < 0] <- NA 
+```
+
+Only categorical nominal data are treated as categorical, while the rest are treated as numerical (including categorical ordinal data). Therefore:
+
+```{r}
+categorical_names <- c("EEquality","EPrivate","EGovernment","ECompetition","EHardWork","PIA","PIAB","PNewspaper","PTelevision","PRadio","PMobile","PEmail","PInternet","PSocial","PFriends", "Country", "MF") #Here is predefined cols, for all data available in assignment instruction. It may include cols that doesnt exist.
+numerical_names <- setdiff(names(VC), categorical_names)
+
+numerical <- VC[, !names(VC) %in% categorical_names]
+
+categorical <- VC[, names(VC) %in% categorical_names]
+```
+
+**Question 1**
+
+Dimensions of data (col × row)
+
+```{r}
+dim(VC)
+```
+
+Check data types
+
+```{r}
+sapply(VC, class)
+```
+
+Checking there is any missing values
+
+```{r}
+na_counts <- colSums(is.na(VC))
+na_counts
+```
+
+Checking the distribution of numerical variables
+
+```{r}
+head(numerical)
+```
+
+Distribution
+
+```{r}
+par(mar = c(2, 7, 2, 2))  
+boxplot(numerical[, names(numerical) != "Age"],
+        col = "lightblue", 
+        horizontal = TRUE,  
+        las = 2,
+        main = "Distribution of Numeric Variables (Excluding Age)")
+
+par(mar = c(7, 3, 2, 2))  
+boxplot(numerical$Age, 
+        main = "Distribution of Age Variable",
+        col = "lightblue",
+        las = 2,
+        horizontal = TRUE)
+```
+
+Variety of non-numerical attributes (How many unique countries are there)
+
+```{r}
+unique_values <- lapply(categorical, unique)
+unique_values <- lapply(unique_values, function(x) sort(x) ) # here it excluded NA values out idk why
+
+unique_values
+```
+
+**Question 2a: Comparison**
+
+```{r}
+colSums(is.na(VC %>% filter(Country == focus_country)))
+#This means we cant do this directly to our focus country.
+```
+
+```{r}
+numerical <- lapply(numerical, function(x) {
+  ifelse(is.na(x), ceiling(mean(x, na.rm = TRUE)), x)
+})
+```
+
+colSums(is.na(numerical))
+
+```{r}
+# Impute missing values in numerical columns with ceiling of the mean
+numerical <- data.frame(lapply(numerical, function(x) {
+  ifelse(is.na(x), ceiling(mean(x, na.rm = TRUE)), x)
+}))
+
+# Check the sum of NAs in numerical columns after imputation
+colSums(is.na(numerical))
+```
+
+```{r}
+# Replace the imputed numerical values back into the original VC dataset
+VC[numerical_names] <- numerical
+
+# Check if there are any remaining NA values in the entire dataset
+colSums(is.na(VC))
+```
+
+```{r}
+VC <- VC %>% filter(complete.cases(select(., all_of(names(VC)))))
+```
+
+Defining 2 dataframes (containing/ excluding)
+
+```{r}
+# FIrst we separate the VC data into one with focus country and the other one with other country,
+
+VC_focus <- VC %>% filter(Country == focus_country)
+VC_other <- VC %>% filter(Country != focus_country)
+```
+
+```{r}
+# Then we define a function that separate each VC data into categorical and numerical.
+
+process_data <- function(df) {
+  list(
+    numerical = df %>% select(-all_of(intersect(categorical_names, names(VC)))),
+    categorical = df %>% select(-all_of(intersect(categorical_names, names(VC))))
+  )
+}
+
+focus_data <- process_data(VC_focus)
+other_data <- process_data(VC_other)
+
+# We call out VC_focus/ VC_other when all the whole data needed
+# We would call out focus_data/ other_data when categorical/ numerical data need to be treated separately.
+# i.e: when categorical data of focus country is needed, it is called by calling out focus_data$categorical
+```
+
+Difference in data format
+
+```{r}
+dim(VC_focus)
+dim(VC_other)
+```
+
+Visualisation of all numerical values
+
+```{r}
+# To avoid messy, we pre-define a function that create comparative boxplot
+compare_numerical <- function(focus_num, other_num, title_suffix = "") {
+  
+  # Combine data for plotting
+  plot_data <- bind_rows(
+    focus_num %>% mutate(Group = "Focus"),
+    other_num %>% mutate(Group = "Other")
+  ) %>% 
+    pivot_longer(-Group, names_to = "Variable", values_to = "Value") %>% 
+    drop_na(Value)  # Remove missing values
+  
+  # Create plot
+  ggplot(plot_data, aes(x = Value, y = Variable, fill = Group)) +
+    geom_boxplot(position = position_dodge(0.8), alpha = 0.7) +
+    labs(title = paste("Numerical Variables Comparison", title_suffix),
+         x = "Value", y = "")+
+    
+  theme_minimal()
+}
+```
+
+```{r}
+
+# pre-define separation of variables
+split_point <- ceiling(length(numerical_names) / 3)
+first_part_vars <- numerical_names[1:split_point]
+second_part_vars <- numerical_names[(split_point+1):(2*(split_point))]
+second_part_vars <- setdiff(second_part_vars, c("Age"))
+third_part_vars <- numerical_names[(2*(split_point)+1):length(numerical_names)]
+```
+
+```{r}
+# Create comparisons
+comparisons <- list()
+
+# Compare first part
+comparisons$first_part <- compare_numerical(
+  focus_num = VC_focus %>% select(all_of(first_part_vars)),
+  other_num = VC_other %>% select(all_of(first_part_vars)),
+  title_suffix = "(First Part)"
+)
+
+# Compare second part
+comparisons$second_part <- compare_numerical(
+  focus_num = VC_focus %>% select(all_of(second_part_vars)),
+  other_num = VC_other %>% select(all_of(second_part_vars)),
+  title_suffix = "(Second Part)"
+)
+
+# Compare Age separately 
+comparisons$age <- compare_numerical(
+  focus_num = VC_focus %>% select(Age),
+  other_num = VC_other %>% select(Age),
+  title_suffix = "(Age)"
+)
+
+# Compare third part
+comparisons$third_part <- compare_numerical(
+  focus_num = VC_focus %>% select(all_of(third_part_vars)),
+  other_num = VC_other %>% select(all_of(third_part_vars)),
+  title_suffix = "(Third Part)"
+)
+
+# Display plots
+comparisons
+```
+
+```{r}
+comparisons$age
+```
+
+Correlation Matrix
+
+```{r}
+cor_plot <- function(data, plot_title) {
+   cor_matrix <- data %>% 
+  select(where(is.numeric)) %>%  
+   cor(use = "complete.obs")      
+  
+  melted_cor <- melt(cor_matrix, na.rm = TRUE)
+  
+  ggplot(melted_cor, aes(Var1, Var2, fill = value)) +
+    geom_tile(color = "white") +  # Add tile layer for the heatmap
+    scale_fill_gradient2(low = "blue", mid = "white", high = "red",
+                        midpoint = 0, limit = c(-1,1), name = "Correlation") +
+    theme_minimal() +
+    theme(axis.text.x = element_text(angle = 45, vjust = 1, hjust = 1),
+          axis.title = element_blank(),
+          panel.grid = element_blank(),
+          plot.title = element_text(hjust = 0.5)) +  # Center the title
+    coord_fixed() +
+    labs(title = plot_title)
+}
+```
+
+```{r}
+focus_plot <- cor_plot(focus_data$numerical, paste("Correlation Matrix -", focus_country))
+other_plot <- cor_plot(other_data$numerical, "Correlation Matrix - Other Countries")
+
+focus_plot
+other_plot
+```
+
+**Question 2b, 2c & 3b: Finding significant and most important predictor**
+
+```{r}
+# very obviously the following are predefined variables of social organisation conficence
+confidence_cols <- c("CReligious", "CArmedForces", "CPress", "CTelevision", "CUnions", "CPolice", "CCourts", "CGovernment", "CPParties", "CParliament", "CCivilService", "CUniversities", "CElections", "CMajCompanies", "CBanks", "CEnvOrg")
+```
+
+```{r}
+focus_data$confidence <- focus_data$numerical[, names(focus_data$numerical) %in% confidence_cols]
+focus_data$predictors <- focus_data$numerical[, !names(focus_data$numerical) %in% confidence_cols]
+
+other_data$confidence <- other_data$numerical[, names(other_data$numerical) %in% confidence_cols]
+other_data$predictors <- other_data$numerical[, !names(other_data$numerical) %in% confidence_cols]
+```
+
+```{r}
+rsquared <- function(confidence, predictors) {
+
+  model_data <- data.frame(confidence, predictors)
+  
+  # Fit linear model
+  model <- lm(confidence ~ ., data = model_data)
+  
+  # Return R-squared
+  summary(model)$r.squared
+}
+```
+
+```{r}
+p_value <- function(confidence, predictors) {
+  model_data <- data.frame(confidence = confidence, predictors)
+  model <- lm(confidence ~ ., data = model_data)
+  
+  coef_summary <- summary(model)$coefficients
+  predictor_names <- rownames(coef_summary)[-1]  # Remove intercept since we don wan
+  
+  # Return data frame of results
+  result <- data.frame(
+    Coefficient = coef_summary[predictor_names, "Estimate"],
+    P_value = coef_summary[predictor_names, "Pr(>|t|)"],
+    stringsAsFactors = FALSE
+  )
+  result <- result %>% filter(P_value < 0.05)
+
+  return(result)
+}
+```
+
+```{r}
+analyse_confidence <- function(data) {
+  
+  # Initialise results list
+  results_list <- list()
+  
+  # Analyse each confidence measure
+  for (i in 1:ncol(data$confidence)) {
+    conf_name <- colnames(data$confidence)[i]
+    res <- p_value(data$confidence[, i], data$predictors)
+    res$Confidence <- conf_name
+    results_list[[i]] <- res
+  }
+  
+  return(results_list)
+}
+```
+
+```{r}
+plot_predictor_frequency <- function(results_list) {
+  
+  all_predictors <- unlist(lapply(results_list, function(x) rownames(x)))
+  
+    predictor_counts <- as.data.frame(table(all_predictors))
+  names(predictor_counts) <- c("Predictor", "Freq")
+  
+   predictor_counts <- predictor_counts[order(-predictor_counts$Freq), ]
+  
+    predictor_counts <- predictor_counts[predictor_counts$Predictor != "", ]
+  
+  # Create plot
+  ggplot(predictor_counts, aes(x = reorder(Predictor, Freq), y = Freq)) +
+    geom_bar(stat = "identity", fill = "#1E90FF") +
+    geom_text(aes(label = Freq), hjust = -0.2, size = 3.5) +
+    coord_flip() +
+    labs(title = "Frequency of Significant Predictors Across Models",
+         x = "Predictor Variable",
+         y = "Number of Models") +
+    theme_minimal() +
+    theme(
+      plot.title = element_text(hjust = 0.5, face = "bold", size = 14),
+      plot.subtitle = element_text(hjust = 0.5, size = 10),
+      axis.text.y = element_text(size = 11),
+      panel.grid.major.y = element_blank()
+    ) +
+    scale_y_continuous(expand = expansion(mult = c(0, 0.1))) # Add space for labels
+}
+```
+
+```{r}
+summarise_predictors <- function (results_list){
+
+  conf <- character()
+  nrow <- numeric()
+  
+  for (result in results_list) {
+    conf <- c(conf, unique(result$Confidence))  
+    nrow <- c(nrow, nrow(result))              
+  }
+  
+  # Create the final data frame
+  predictor_counts <- data.frame(
+    Confidence = conf,
+    Number_of_predictors = nrow
+  )
+  
+  return (predictor_counts)
+}
+```
+
+**Question 2b**
+
+```{r}
+focus_rsquared_results <- sapply(focus_data$confidence, rsquared, 
+                          predictors = focus_data$predictors)
+
+focus_rsquared_results
+```
+
+```{r}
+focus_results <- analyse_confidence(focus_data)
+focus_results
+```
+
+```{r}
+plot_predictor_frequency(focus_results)
+```
+
+```{r}
+summarise_predictors(focus_results)
+```
+
+**Question 2c**
+
+```{r}
+other_rsquared_results <- sapply(other_data$confidence, rsquared, 
+                          predictors = other_data$predictors)
+
+other_rsquared_results
+```
+
+```{r}
+other_results <- analyse_confidence(other_data)
+other_results
+```
+
+```{r}
+plot_predictor_frequency(other_results)
+```
+
+```{r}
+summarise_predictors(other_results)
+```
+
+**Question 3a: Clustering**
+
+```{r}
+ghs = read.csv("GHX_INDEX_202204.csv")
+
+# The following are all countries available in VC data too. 
+selected_countries <- c("Andorra", "Argentina", "Armenia", "Australia", "Bangladesh", "Bolivia", "Brazil", "Canada", "Chile", "China", "Colombia", "Cyprus", "Czech Republic", "Germany", "Ecuador", "Egypt", "Ethiopia", "Great Britain", "Greece", "Guatemala", "Hong Kong", "Indonesia", "India", "Iran", "Iraq", "Jordan", "Japan", "Kazakhstan", "Kenya", "Kyrgyzstan", "South Korea", "Lebanon", "Libya", "Macedonia", "Morocco", "Moldova", "Mexico", "Myanmar", "Mongolia", "Malaysia", "Nigeria", "Nicaragua", "Netherlands", "New Zealand", "Pakistan", "Peru", "Philippines", "Puerto Rico", "Romania", "Russia", "Singapore", "Serbia", "Slovakia", "Thailand", "Tajikistan", "Tunisia", "Turkey", "Taiwan", "Ukraine", "Uruguay", "United States", "Uzbekistan", "Venezuela", "Viet Nam", "Zimbabwe")
+```
+
+```{r}
+dim(ghs)
+```
+
+```{r}
+ghs_clean <- ghs %>%
+  
+  filter(Country %in% selected_countries) %>%
+  
+  drop_na() %>%
+  
+  filter(if_all(where(is.numeric), ~ abs(as.vector(scale(.))) <= 3))
+```
+
+```{r}
+sapply(ghs,class)
+```
+
+```{r}
+summary(ghs)
+```
+
+```{r}
+ghs_scaled = scale(ghs[,2:length(names(ghs))])
+```
+
+```{r}
+ncol(ghs)
+```
+
+```{r}
+set.seed(33521352)
+ghskfit <- kmeans(ghs_scaled, centers = 5, nstart = 20)
+ghskfit
+```
+
+```{r}
+library(cluster)
+
+i_silhouette_score <- function(k){
+  km <- kmeans(ghs_scaled, centers = k, nstart = 25)
+  ss <- silhouette(km$cluster, dist(ghs_scaled)) 
+  mean(ss[, 3])  
+}
+
+k <- 2:8
+avg_sil <- sapply(k, i_silhouette_score)
+
+plot(k, avg_sil, type = 'b', 
+     xlab = 'Number of clusters',
+     ylab = 'Average Silhouette Scores',
+     main = 'Silhouette Analysis') 
+```
+
+```{r}
+best_ghskfit <- kmeans(ghs_scaled, centers = 2, nstart = 20) 
+best_ghskfit
+```
+
+```{r}
+cluster_country_table <- table(actual = ghs$Country, fitted = best_ghskfit$cluster)
+head(cluster_country_table,10)
+```
+
+```{r}
+
+# 1. First, find which cluster the focus country belongs to
+focus_cluster <- ghskfit$cluster[ghs$Country == focus_country_full]
+focus_cluster
+#The result means it appeared in each of these clusters.
+```
+
+```{r}
+
+# 2. Then find all countries in the same cluster
+similar_countries <- ghs$Country[ghskfit$cluster == focus_cluster]
+
+
+# 3. Then print the results
+similar_countries_data <- ghs[ghs$Country %in% similar_countries & ghs$Country != "Andorra", ]
+
+similar_countries_data
+```
+
+**Question 3b**
+
+```{r}
+head(similar_countries_data$Country, 5)
+```
+
+```{r}
+VC_cluster <- VC %>% 
+  filter(Country %in% c("BGD", "BOL", "EGY",  "IRN"))
+cluster_data <- process_data(VC_cluster)
+```
+
+```{r}
+cluster_data$confidence <- cluster_data$numerical[, names(cluster_data$numerical) %in% confidence_cols]
+cluster_data$predictors <- cluster_data$numerical[, !names(cluster_data$numerical) %in% confidence_cols]
+```
+
+```{r}
+cluster_rsquared_results <- sapply(cluster_data$confidence, rsquared, 
+                          predictors = cluster_data$predictors)
+
+cluster_rsquared_results
+```
+
+```{r}
+cluster_results <- analyse_confidence(cluster_data)
+cluster_results
+```
+
+```{r}
+summarise_predictors(cluster_results)
+```
+
+*END OF APPENDIX*
+
+------------------------------------------------------------------------
